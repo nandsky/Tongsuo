@@ -456,6 +456,7 @@ my @disablables = (
     "legacy",
     "loadereng",
     "makedepend",
+    "mlkem",
     "module",
     "msan",
     "multiblock",

@@ -3504,7 +3504,7 @@ static const EVP_INIT_TEST_st evp_init_tests[] = {
 static int evp_init_seq_set_iv(EVP_CIPHER_CTX *ctx, const EVP_INIT_TEST_st *t)
 {
     int res = 0;
-    
+
     if (t->ivlen != 0) {
         if (!TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, t->ivlen, NULL)))
             goto err;
@@ -3688,7 +3688,7 @@ static int test_evp_reset(int idx)
         TEST_info("test_evp_reset %d: %s", idx, errmsg);
     EVP_CIPHER_CTX_free(ctx);
     EVP_CIPHER_free(type);
-    return testresult;    
+    return testresult;
 }
 
 typedef struct {
@@ -4852,6 +4852,108 @@ static int test_aes_rc4_keylen_change_cve_2023_5363(void)
 }
 #endif
 
+static int test_ml_kem(void)
+{
+    EVP_PKEY *akey, *bkey = NULL;
+    int res = 0;
+    size_t publen;
+    unsigned char *rawpub = NULL;
+    EVP_PKEY_CTX *ctx = NULL;
+    unsigned char *wrpkey = NULL, *agenkey = NULL, *bgenkey = NULL;
+    size_t wrpkeylen, agenkeylen, bgenkeylen, i;
+
+    /* Generate Alice's key */
+    akey = EVP_PKEY_Q_keygen(testctx, NULL, "ML-KEM-768");
+    if (!TEST_ptr(akey))
+        goto err;
+
+    /* Get the raw public key */
+    publen = EVP_PKEY_get1_encoded_public_key(akey, &rawpub);
+    if (!TEST_size_t_gt(publen, 0))
+        goto err;
+
+    /* Create Bob's key and populate it with Alice's public key data */
+    bkey = EVP_PKEY_new();
+    if (!TEST_ptr(bkey))
+        goto err;
+
+    if (!TEST_int_gt(EVP_PKEY_copy_parameters(bkey, akey), 0))
+        goto err;
+
+    if (!TEST_true(EVP_PKEY_set1_encoded_public_key(bkey, rawpub, publen)))
+        goto err;
+
+    /* Encapsulate Bob's key */
+    ctx = EVP_PKEY_CTX_new_from_pkey(testctx, bkey, NULL);
+    if (!TEST_ptr(ctx))
+        goto err;
+
+    if (!TEST_int_gt(EVP_PKEY_encapsulate_init(ctx, NULL), 0))
+        goto err;
+
+    if (!TEST_int_gt(EVP_PKEY_encapsulate(ctx, NULL, &wrpkeylen, NULL,
+                                          &bgenkeylen), 0))
+        goto err;
+
+    if (!TEST_size_t_gt(wrpkeylen, 0) || !TEST_size_t_gt(bgenkeylen, 0))
+        goto err;
+
+    wrpkey = OPENSSL_zalloc(wrpkeylen);
+    bgenkey = OPENSSL_zalloc(bgenkeylen);
+    if (!TEST_ptr(wrpkey) || !TEST_ptr(bgenkey))
+        goto err;
+    if (!TEST_int_gt(EVP_PKEY_encapsulate(ctx, wrpkey, &wrpkeylen, bgenkey,
+                                          &bgenkeylen), 0))
+        goto err;
+
+    EVP_PKEY_CTX_free(ctx);
+
+    /* Alice now decapsulates Bob's key */
+    ctx = EVP_PKEY_CTX_new_from_pkey(testctx, akey, NULL);
+    if (!TEST_ptr(ctx))
+        goto err;
+
+    if (!TEST_int_gt(EVP_PKEY_decapsulate_init(ctx, NULL), 0))
+        goto err;
+
+    if (!TEST_int_gt(EVP_PKEY_decapsulate(ctx, NULL, &agenkeylen, wrpkey,
+                                          wrpkeylen), 0))
+        goto err;
+
+    if (!TEST_size_t_gt(agenkeylen, 0))
+        goto err;
+
+    agenkey = OPENSSL_zalloc(agenkeylen);
+    if (!TEST_ptr(agenkey))
+        goto err;
+
+    if (!TEST_int_gt(EVP_PKEY_decapsulate(ctx, agenkey, &agenkeylen, wrpkey,
+                                          wrpkeylen), 0))
+        goto err;
+
+    /* Hopefully we ended up with a shared key */
+    if (!TEST_mem_eq(agenkey, agenkeylen, bgenkey, bgenkeylen))
+        goto err;
+
+    /* Verify we generated a non-zero shared key */
+    for (i = 0; i < agenkeylen; i++)
+        if (agenkey[i] != 0)
+            break;
+    if (!TEST_size_t_ne(i, agenkeylen))
+        return 0;
+
+    res = 1;
+ err:
+     EVP_PKEY_CTX_free(ctx);
+    EVP_PKEY_free(akey);
+    EVP_PKEY_free(bkey);
+    OPENSSL_free(rawpub);
+    OPENSSL_free(wrpkey);
+    OPENSSL_free(agenkey);
+    OPENSSL_free(bgenkey);
+    return res;
+}
+
 int setup_tests(void)
 {
     OPTION_CHOICE o;
@@ -4992,6 +5094,8 @@ int setup_tests(void)
 #ifndef OPENSSL_NO_RC4
     ADD_TEST(test_aes_rc4_keylen_change_cve_2023_5363);
 #endif
+
+    ADD_TEST(test_ml_kem);
 
     return 1;
 }

@@ -243,3 +243,5 @@
 #define PROV_DESCS_SM2 "OpenSSL SM2 implementation"
 #define PROV_NAMES_SM2DH "SM2DH"
 #define PROV_DESCS_SM2DH "Tongsuo SM2DH implementation"
+#define PROV_NAMES_MLKEM768 "ML-KEM-768"
+#define PROV_DESCS_MLKEM768 "OpenSSL ML-KEM-768 implementation"
